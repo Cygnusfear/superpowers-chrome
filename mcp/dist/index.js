@@ -14014,19 +14014,29 @@ async function executeBrowserAction(params) {
       }
       if (params.selector) {
         if (format === "text") {
-          return await chromeLib.extractText(tabIndex, params.selector);
+          const result = await chromeLib.extractText(tabIndex, params.selector);
+          if (result === null || result === void 0) {
+            throw new Error(`Element not found or has no text content: ${params.selector}`);
+          }
+          return String(result);
         } else if (format === "html") {
-          return await chromeLib.getHtml(tabIndex, params.selector);
+          const result = await chromeLib.getHtml(tabIndex, params.selector);
+          if (result === null || result === void 0) {
+            throw new Error(`Element not found: ${params.selector}`);
+          }
+          return String(result);
         } else {
           throw new Error("selector-based extraction only supports 'text' or 'html' format");
         }
       } else {
         if (format === "text") {
-          return await chromeLib.evaluate(tabIndex, "document.body.innerText");
+          const result = await chromeLib.evaluate(tabIndex, "document.body.innerText");
+          return String(result ?? "");
         } else if (format === "html") {
-          return await chromeLib.getHtml(tabIndex);
+          const result = await chromeLib.getHtml(tabIndex);
+          return String(result ?? "");
         } else if (format === "markdown") {
-          return await chromeLib.evaluate(tabIndex, `
+          const result = await chromeLib.evaluate(tabIndex, `
             Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, a, li, pre, code'))
               .map(el => {
                 const tag = el.tagName.toLowerCase();
@@ -14040,6 +14050,7 @@ async function executeBrowserAction(params) {
               .filter(x => x)
               .join('\\n\\n')
           `.replace(/\s+/g, " ").trim());
+          return String(result ?? "");
         } else {
           throw new Error("extract format must be 'text', 'html', or 'markdown'");
         }
@@ -14074,6 +14085,9 @@ Result: ${evalResult.result}`);
         throw new Error("attr requires payload with attribute name");
       }
       const attrValue = await chromeLib.getAttribute(tabIndex, params.selector, params.payload);
+      if (attrValue === null || attrValue === void 0) {
+        throw new Error(`Element not found or attribute '${params.payload}' does not exist: ${params.selector}`);
+      }
       return String(attrValue);
     case "await_element" /* AWAIT_ELEMENT */:
       if (!params.selector) {

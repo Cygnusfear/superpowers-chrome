@@ -556,12 +556,71 @@ async function screenshot(tabIndexOrWsUrl, filename, selector = null) {
   return filename;
 }
 
+/**
+ * Clone Chrome profile to temp directory
+ * Copies essential profile data while excluding locks and cached data
+ */
+function cloneProfile(sourceDir, destDir) {
+  const { execSync } = require('child_process');
+  const { existsSync, mkdirSync } = require('fs');
+  const path = require('path');
+
+  if (!existsSync(sourceDir)) {
+    console.error(`Source profile not found: ${sourceDir}`);
+    return false;
+  }
+
+  try {
+    mkdirSync(destDir, { recursive: true });
+
+    // Essential files/directories to copy
+    const essentialItems = [
+      'Default/Bookmarks',
+      'Default/Preferences',
+      'Default/History',
+      'Default/Cookies',
+      'Default/Web Data',
+      'Default/Login Data',
+      'Default/Extensions',
+      'Local State'
+    ];
+
+    console.error(`Cloning Chrome profile from ${sourceDir}...`);
+
+    for (const item of essentialItems) {
+      const sourcePath = path.join(sourceDir, item);
+      const destPath = path.join(destDir, item);
+      const destParent = path.dirname(destPath);
+
+      if (existsSync(sourcePath)) {
+        try {
+          mkdirSync(destParent, { recursive: true });
+          // Use cp -R for directories, cp for files
+          const isDir = require('fs').statSync(sourcePath).isDirectory();
+          execSync(`cp -R "${sourcePath}" "${destPath}"`, { stdio: 'ignore' });
+          console.error(`  Copied: ${item}`);
+        } catch (err) {
+          // Some items may fail to copy (e.g., locked files), that's ok
+          console.error(`  Skipped: ${item} (${err.message})`);
+        }
+      }
+    }
+
+    console.error('Profile clone complete');
+    return true;
+  } catch (err) {
+    console.error(`Failed to clone profile: ${err.message}`);
+    return false;
+  }
+}
+
 async function startChrome(headless = false) {
   const { spawn } = require('child_process');
   const { existsSync } = require('fs');
   const os = require('os');
+  const path = require('path');
 
-  // Platform-specific Chrome paths
+  // Platform-specific Chrome paths and profile locations
   const chromePaths = {
     darwin: [
       '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -578,13 +637,19 @@ async function startChrome(headless = false) {
     ]
   };
 
+  const defaultProfilePaths = {
+    darwin: path.join(os.homedir(), 'Library/Application Support/Google/Chrome'),
+    linux: path.join(os.homedir(), '.config/google-chrome'),
+    win32: path.join(os.homedir(), 'AppData/Local/Google/Chrome/User Data')
+  };
+
   const platform = os.platform();
   const paths = chromePaths[platform] || [];
 
   let chromePath = null;
-  for (const path of paths) {
-    if (existsSync(path)) {
-      chromePath = path;
+  for (const p of paths) {
+    if (existsSync(p)) {
+      chromePath = p;
       break;
     }
   }
@@ -593,7 +658,17 @@ async function startChrome(headless = false) {
     throw new Error(`Chrome not found. Searched: ${paths.join(', ')}`);
   }
 
-  const userDataDir = require('path').join(os.tmpdir(), `chrome-remote-${Date.now()}`);
+  // Create temp directory for this session
+  const userDataDir = path.join(os.tmpdir(), `chrome-remote-${Date.now()}`);
+
+  // Try to clone existing profile
+  const defaultProfilePath = defaultProfilePaths[platform];
+  if (defaultProfilePath && existsSync(defaultProfilePath)) {
+    console.error('Cloning your Chrome profile for isolated session...');
+    cloneProfile(defaultProfilePath, userDataDir);
+  } else {
+    console.error('Using fresh profile (no existing profile found)');
+  }
 
   const chromeArgs = [
     `--remote-debugging-port=9222`,
@@ -608,7 +683,6 @@ async function startChrome(headless = false) {
     '--disable-component-update',
     '--disable-default-apps',
     '--disable-dev-shm-usage',
-    '--disable-extensions',
     '--disable-features=TranslateUI',
     '--disable-hang-monitor',
     '--disable-ipc-flooding-protection',
